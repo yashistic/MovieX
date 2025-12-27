@@ -31,17 +31,17 @@ const platformSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for faster lookups
+// Indexes for faster lookups
 platformSchema.index({ name: 1 });
 platformSchema.index({ isActive: 1 });
 
-// Create slug from name before saving
+// Pre-save hook: generate slug automatically if missing
 platformSchema.pre('save', function(next) {
-  if (this.isModified('name') && !this.slug) {
+  if (!this.slug && this.name) {
     this.slug = this.name
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
+      .replace(/[^a-z0-9]+/g, '-') // replace non-alphanumeric with dash
+      .replace(/^-+|-+$/g, '');    // trim leading/trailing dashes
   }
   next();
 });

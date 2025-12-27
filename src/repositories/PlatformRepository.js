@@ -28,6 +28,7 @@ class PlatformRepository {
 
   /**
    * Find or create platform
+   * Ensures slug is always set
    */
   async findOrCreate(platformData) {
     try {
@@ -37,10 +38,18 @@ class PlatformRepository {
         return existing;
       }
 
-      const platform = new Platform(platformData);
+      // Generate slug if not provided
+      const slug = platformData.slug || platformData.name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+      const platform = new Platform({
+        ...platformData,
+        slug
+      });
+
       await platform.save();
-      
-      logger.debug(`Created new platform: ${platform.name}`);
+      logger.debug(`Created new platform: ${platform.name} (slug: ${platform.slug})`);
       return platform;
     } catch (error) {
       logger.error('Error in findOrCreate platform:', error);
