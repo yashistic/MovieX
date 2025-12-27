@@ -5,17 +5,20 @@ const { RateLimiter, retryWithBackoff } = require('../../utils/apiHelpers');
 
 class JustWatchClient {
   constructor() {
-    this.baseUrl = config.justWatch.baseUrl;
+    this.baseUrl = 'https://apis.justwatch.com';
+    this.graphqlUrl = 'https://apis.justwatch.com/graphql';
     this.region = config.justWatch.region;
     this.language = config.justWatch.language;
     this.rateLimiter = new RateLimiter(config.justWatch.requestsPerSecond);
     
     this.client = axios.create({
-      baseURL: this.baseUrl,
       timeout: 15000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://www.justwatch.com',
+        'Referer': 'https://www.justwatch.com/'
       }
     });
   }
@@ -23,7 +26,7 @@ class JustWatchClient {
   /**
    * Make rate-limited request with retry
    */
-  async request(endpoint, method = 'GET', data = null) {
+  async request(url, method = 'GET', data = null, headers = {}) {
     await this.rateLimiter.throttle();
 
     return retryWithBackoff(
@@ -31,11 +34,16 @@ class JustWatchClient {
         try {
           const config = {
             method,
-            url: endpoint
+            url,
+            headers: {
+              ...this.client.defaults.headers,
+              ...headers
+            }
           };
 
           if (data) {
             config.data = data;
+            config.headers['Content-Type'] = 'application/json';
           }
 
           const response = await this.client(config);
@@ -43,7 +51,7 @@ class JustWatchClient {
         } catch (error) {
           if (error.response) {
             logger.error(`JustWatch API error: ${error.response.status}`, {
-              endpoint,
+              url,
               status: error.response.status
             });
           }
@@ -52,49 +60,199 @@ class JustWatchClient {
       },
       {
         onRetry: (attempt, delay) => {
-          logger.warn(`Retrying JustWatch request (attempt ${attempt})`, { endpoint });
+          logger.warn(`Retrying JustWatch request (attempt ${attempt})`, { url });
         }
       }
     );
   }
 
   /**
-   * Get available providers (platforms) for a region
+   * Get available providers (platforms) for a region using GraphQL
    */
   async getProviders() {
     try {
       logger.debug(`Fetching JustWatch providers for region: ${this.region}`);
       
-      const endpoint = `/providers/locale/${this.region}`;
-      return await this.request(endpoint);
+      const query = `
+        query GetProviders($country: Country!) {
+          packages(country: $country, platform: WEB) {
+            id
+            packageId
+            clearName
+            technicalName
+            shortName
+            icon
+          }
+        }
+      `;
+
+      const variables = {
+        country: 'IN'
+      };
+
+      const response = await this.request(
+        this.graphqlUrl,
+        'POST',
+        { query, variables },
+        { 'Content-Type': 'application/json' }
+      );
+
+      return response.data?.packages || [];
     } catch (error) {
-      logger.error('Error fetching JustWatch providers:', error);
+      logger.error('Error fetching JustWatch providers:', error.message);
       return [];
     }
   }
 
   /**
-   * Search for titles on a specific platform
+   * Search for titles using GraphQL (NEW METHOD)
+   */
+  async searchTitlesGraphQL(options = {}) {
+    try {
+      const {
+        providers = [],
+        page = 1,
+        pageSize = 30,
+        contentTypes = ['MOVIE']
+      } = options;
+
+      logger.debug(`Searching JustWatch titles (page ${page})`);
+
+      const query = `
+        query GetPopularTitles(
+          $country: Country!
+          $language: Language!
+          $first: Int!
+          $page: Int
+          $packages: [String!]
+          $objectTypes: [ObjectType!]
+        ) {
+          popularTitles(
+            country: $country
+            first: $first
+            page: $page
+            packages: $packages
+            sortBy: POPULAR
+            objectTypes: $objectTypes
+          ) {
+            edges {
+              node {
+                id
+                objectId
+                objectType
+                content(country: $country, language: $language) {
+                  title
+                  originalReleaseYear
+                  originalReleaseDate
+                  shortDescription
+                  posterUrl
+                  backdrops {
+                    backdropUrl
+                  }
+                  externalIds {
+                    imdbId
+                    tmdbId
+                  }
+                  genres {
+                    shortName
+                    translation(language: $language)
+                  }
+                }
+                offers(country: $country, platform: WEB) {
+                  monetizationType
+                  presentationType
+                  package {
+                    id
+                    packageId
+                    clearName
+                  }
+                  standardWebURL
+                }
+              }
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
+            totalCount
+          }
+        }
+      `;
+
+      const variables = {
+        country: 'IN',
+        language: 'en',
+        first: pageSize,
+        page: page - 1, // JustWatch uses 0-based pagination
+        packages: providers.length > 0 ? providers : undefined,
+        objectTypes: contentTypes
+      };
+
+      const response = await this.request(
+        this.graphqlUrl,
+        'POST',
+        { query, variables }
+      );
+
+      const edges = response.data?.popularTitles?.edges || [];
+      const items = edges.map(edge => this.normalizeGraphQLNode(edge.node));
+      
+      const pageInfo = response.data?.popularTitles?.pageInfo || {};
+      const totalCount = response.data?.popularTitles?.totalCount || 0;
+      
+      return {
+        items,
+        total_pages: Math.ceil(totalCount / pageSize),
+        has_next_page: pageInfo.hasNextPage
+      };
+    } catch (error) {
+      logger.error('Error searching JustWatch titles:', error.message);
+      return { items: [], total_pages: 0, has_next_page: false };
+    }
+  }
+
+  /**
+   * Get titles by provider using GraphQL
    */
   async getTitlesByProvider(providerId, page = 1, pageSize = 30) {
     try {
       logger.debug(`Fetching titles from provider ${providerId}, page ${page}`);
       
-      const endpoint = `/titles/${this.region}/popular`;
-      
-      const payload = {
-        page,
-        page_size: pageSize,
+      return await this.searchTitlesGraphQL({
         providers: [providerId],
-        content_types: ['movie']
-      };
-
-      const response = await this.request(endpoint, 'POST', payload);
-      return response;
+        page,
+        pageSize,
+        contentTypes: ['MOVIE']
+      });
     } catch (error) {
-      logger.error(`Error fetching titles from provider ${providerId}:`, error);
+      logger.error(`Error fetching titles from provider ${providerId}:`, error.message);
       return { items: [], total_pages: 0 };
     }
+  }
+
+  /**
+   * Normalize GraphQL node to old format
+   */
+  normalizeGraphQLNode(node) {
+    const content = node.content || {};
+    
+    return {
+      id: node.objectId?.toString() || node.id,
+      object_type: node.objectType,
+      title: content.title,
+      original_title: content.title,
+      original_release_year: content.originalReleaseYear,
+      release_date: content.originalReleaseDate,
+      short_description: content.shortDescription,
+      poster: content.posterUrl,
+      backdrops: content.backdrops?.map(b => b.backdropUrl) || [],
+      external_ids: {
+        imdb_id: content.externalIds?.imdbId,
+        tmdb_id: content.externalIds?.tmdbId
+      },
+      genres: content.genres || [],
+      offers: node.offers || []
+    };
   }
 
   /**
@@ -104,10 +262,11 @@ class JustWatchClient {
     try {
       logger.debug(`Fetching JustWatch title details: ${justWatchId}`);
       
-      const endpoint = `/titles/movie/${justWatchId}/locale/${this.region}`;
+      // Try the old REST endpoint first
+      const endpoint = `${this.baseUrl}/content/titles/movie/${justWatchId}/locale/${this.region}`;
       return await this.request(endpoint);
     } catch (error) {
-      logger.error(`Error fetching JustWatch title ${justWatchId}:`, error);
+      logger.error(`Error fetching JustWatch title ${justWatchId}:`, error.message);
       return null;
     }
   }
@@ -119,19 +278,42 @@ class JustWatchClient {
     try {
       logger.debug(`Searching JustWatch for: ${query}`);
       
-      const endpoint = `/titles/${this.region}/popular`;
-      
-      const payload = {
-        page,
-        page_size: 10,
-        query,
-        content_types: ['movie']
-      };
+      // Use GraphQL search
+      const graphqlQuery = `
+        query SearchTitles($searchQuery: String!, $country: Country!, $language: Language!) {
+          titleSearch(searchQuery: $searchQuery, country: $country, language: $language, first: 10) {
+            edges {
+              node {
+                id
+                objectId
+                objectType
+                content(country: $country, language: $language) {
+                  title
+                  originalReleaseYear
+                }
+              }
+            }
+          }
+        }
+      `;
 
-      const response = await this.request(endpoint, 'POST', payload);
-      return response.items || [];
+      const response = await this.request(
+        this.graphqlUrl,
+        'POST',
+        {
+          query: graphqlQuery,
+          variables: {
+            searchQuery: query,
+            country: 'IN',
+            language: 'en'
+          }
+        }
+      );
+
+      const edges = response.data?.titleSearch?.edges || [];
+      return edges.map(edge => this.normalizeGraphQLNode(edge.node));
     } catch (error) {
-      logger.error('Error searching JustWatch:', error);
+      logger.error('Error searching JustWatch:', error.message);
       return [];
     }
   }
@@ -144,10 +326,11 @@ class JustWatchClient {
                        (jwMovie.release_date ? new Date(jwMovie.release_date).getFullYear() : null);
 
     return {
-      justWatchId: jwMovie.id,
+      justWatchId: jwMovie.id?.toString(),
       title: jwMovie.title,
       originalTitle: jwMovie.original_title || jwMovie.title,
       releaseYear,
+      overview: jwMovie.short_description || null,
       posterPath: jwMovie.poster ? this.normalizePosterPath(jwMovie.poster) : null,
       backdropPath: jwMovie.backdrops?.[0] ? this.normalizePosterPath(jwMovie.backdrops[0]) : null,
       tmdbId: jwMovie.external_ids?.tmdb_id || null,
@@ -161,11 +344,15 @@ class JustWatchClient {
   normalizePosterPath(poster) {
     if (!poster) return null;
     
-    // JustWatch poster paths are like: "/poster/{id}/s592"
-    // We'll store just the ID part
-    if (typeof poster === 'string' && poster.includes('/poster/')) {
-      const match = poster.match(/\/poster\/(\d+)/);
-      return match ? `/jw_poster_${match[1]}` : null;
+    // If it's already a full URL, extract the path
+    if (typeof poster === 'string') {
+      if (poster.startsWith('http')) {
+        return poster;
+      }
+      if (poster.includes('/poster/')) {
+        const match = poster.match(/\/poster\/(\d+)/);
+        return match ? `/jw_poster_${match[1]}` : null;
+      }
     }
     
     return poster;
@@ -180,11 +367,11 @@ class JustWatchClient {
     }
 
     return jwMovie.offers.map(offer => ({
-      providerId: offer.provider_id?.toString(),
-      providerName: offer.provider?.name || null,
-      monetizationType: this.mapMonetizationType(offer.monetization_type),
-      quality: offer.presentation_type || 'unknown',
-      url: offer.urls?.standard_web || null
+      providerId: offer.package?.packageId?.toString() || offer.package?.id?.toString(),
+      providerName: offer.package?.clearName || null,
+      monetizationType: this.mapMonetizationType(offer.monetizationType),
+      quality: offer.presentationType || 'unknown',
+      url: offer.standardWebURL || null
     }));
   }
 
@@ -193,28 +380,26 @@ class JustWatchClient {
    */
   mapMonetizationType(jwType) {
     const typeMap = {
-      'flatrate': 'flatrate',
-      'rent': 'rent',
-      'buy': 'buy',
-      'ads': 'ads',
-      'free': 'free'
+      'FLATRATE': 'flatrate',
+      'RENT': 'rent',
+      'BUY': 'buy',
+      'ADS': 'ads',
+      'FREE': 'free',
+      'FLATRATE_AND_BUY': 'flatrate'
     };
 
-    return typeMap[jwType?.toLowerCase()] || 'flatrate';
+    return typeMap[jwType?.toUpperCase()] || 'flatrate';
   }
 
   /**
-   * Extract genre IDs from JustWatch movie (note: these might not match TMDB)
+   * Extract genre IDs from JustWatch movie
    */
   extractGenres(jwMovie) {
-    // JustWatch uses different genre IDs than TMDB
-    // For now, we'll return the genre names/slugs and resolve them later
     if (!jwMovie.genres) return [];
     
     return jwMovie.genres.map(genre => ({
-      jwId: genre.id,
-      name: genre.translation || genre.short_name,
-      slug: genre.short_name
+      name: genre.translation || genre.shortName,
+      slug: genre.shortName
     }));
   }
 }

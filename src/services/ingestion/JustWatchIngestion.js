@@ -3,11 +3,10 @@ const platformRepository = require('../../repositories/PlatformRepository');
 const movieRepository = require('../../repositories/MovieRepository');
 const availabilityRepository = require('../../repositories/AvailabilityRepository');
 const logger = require('../../utils/logger');
-const slugify = require('slugify');
 
 class JustWatchIngestion {
   /**
-   * Sync platforms from JustWatch
+   * Sync platforms from JustWatch (GraphQL)
    */
   async syncPlatforms() {
     try {
@@ -23,21 +22,17 @@ class JustWatchIngestion {
       const platforms = [];
 
       for (const provider of providers) {
-        const name = provider.clear_name || provider.short_name;
+        try {
+          const platform = await platformRepository.findOrCreate({
+            justWatchId: provider.packageId?.toString() || provider.id?.toString(),
+            name: provider.clearName || provider.shortName || provider.technicalName,
+            icon: provider.icon || null
+          });
 
-        const slug = slugify(name, {
-          lower: true,
-          strict: true
-        });
-
-        const platform = await platformRepository.findOrCreate({
-          justWatchId: provider.id.toString(),
-          name,
-          slug, // ✅ FIX
-          icon: provider.icon_url || null
-        });
-
-        platforms.push(platform);
+          platforms.push(platform);
+        } catch (err) {
+          logger.warn(`Skipping duplicate platform: ${provider.clearName || provider.shortName}`);
+        }
       }
 
       logger.info(`Synced ${platforms.length} platforms from JustWatch`);
@@ -77,6 +72,7 @@ class JustWatchIngestion {
           break;
         }
 
+        // Process each movie in the batch
         for (const jwMovie of response.items) {
           try {
             const result = await this.processJustWatchMovie(jwMovie, platform);
@@ -90,23 +86,22 @@ class JustWatchIngestion {
           }
         }
 
+        // Check if there are more pages
         if (page >= response.total_pages) {
           logger.info(`Reached last page (${page})`);
           break;
         }
 
         page++;
+
+        // Small delay between pages
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      await availabilityRepository.markStaleAsUnavailable(
-        platform._id,
-        ingestionStartTime
-      );
+      // Mark stale availabilities as unavailable
+      await availabilityRepository.markStaleAsUnavailable(platform._id, ingestionStartTime);
 
-      logger.info(
-        `Completed ingestion for ${platform.name}: ${totalMovies} movies, ${totalAvailabilities} availabilities`
-      );
+      logger.info(`Completed ingestion for ${platform.name}: ${totalMovies} movies, ${totalAvailabilities} availabilities`);
 
       return {
         movies: totalMovies,
@@ -123,17 +118,21 @@ class JustWatchIngestion {
    */
   async processJustWatchMovie(jwMovie, platform) {
     try {
+      // Normalize JustWatch data
       const movieData = justWatchClient.normalizeMovieData(jwMovie);
 
+      // Check if movie already exists
       let movie = await movieRepository.findByJustWatchId(movieData.justWatchId);
 
       if (movie) {
+        // Update existing movie if needed (preserve enriched data)
         const updateData = {
           title: movieData.title,
           originalTitle: movieData.originalTitle,
           releaseYear: movieData.releaseYear
         };
 
+        // Only update TMDB/IMDb IDs if they're missing
         if (!movie.tmdbId && movieData.tmdbId) {
           updateData.tmdbId = movieData.tmdbId;
         }
@@ -143,37 +142,35 @@ class JustWatchIngestion {
 
         movie = await movieRepository.update(movie._id, updateData);
       } else {
+        // Create new movie
         movie = await movieRepository.create(movieData);
         logger.debug(`Created new movie: ${movie.title}`);
       }
 
+      // Extract and process offers (availability)
       const offers = justWatchClient.extractOffers(jwMovie);
       let availabilitiesCreated = 0;
 
       for (const offer of offers) {
+        // Find or create the platform for this offer
         let offerPlatform = platform;
         
         if (offer.providerId && offer.providerId !== platform.justWatchId) {
-          offerPlatform = await platformRepository.findByJustWatchId(
-            offer.providerId
-          );
-
+          offerPlatform = await platformRepository.findByJustWatchId(offer.providerId);
+          
           if (!offerPlatform && offer.providerName) {
-            const slug = slugify(offer.providerName, {
-              lower: true,
-              strict: true
-            });
-
             offerPlatform = await platformRepository.findOrCreate({
               justWatchId: offer.providerId,
-              name: offer.providerName,
-              slug // ✅ FIX
+              name: offer.providerName
             });
           }
         }
 
-        if (!offerPlatform) continue;
+        if (!offerPlatform) {
+          continue;
+        }
 
+        // Create or update availability
         await availabilityRepository.upsert({
           movie: movie._id,
           platform: offerPlatform._id,
@@ -205,11 +202,7 @@ class JustWatchIngestion {
 
     for (const platformId of platformIds) {
       try {
-        const result = await this.ingestMoviesFromPlatform(
-          platformId,
-          maxPagesPerPlatform
-        );
-
+        const result = await this.ingestMoviesFromPlatform(platformId, maxPagesPerPlatform);
         results.push({
           platformId,
           ...result
@@ -222,6 +215,7 @@ class JustWatchIngestion {
         });
       }
 
+      // Delay between platforms
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
@@ -235,6 +229,7 @@ class JustWatchIngestion {
     );
 
     logger.info('Ingestion summary:', summary);
+
     return { results, summary };
   }
 
@@ -251,6 +246,7 @@ class JustWatchIngestion {
       }
 
       const platformIds = platforms.map(p => p.justWatchId);
+      
       return await this.ingestFromPlatforms(platformIds, maxPagesPerPlatform);
     } catch (error) {
       logger.error('Error ingesting from all platforms:', error);
