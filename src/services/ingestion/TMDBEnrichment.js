@@ -3,6 +3,18 @@ const genreRepository = require('../../repositories/GenreRepository');
 const movieRepository = require('../../repositories/MovieRepository');
 const logger = require('../../utils/logger');
 
+/**
+ * Create URL-safe slugs
+ */
+function slugify(text) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 class TMDBEnrichment {
   /**
    * Sync all genres from TMDB
@@ -13,14 +25,15 @@ class TMDBEnrichment {
       
       const tmdbGenres = await tmdbClient.getGenres();
       
-      if (tmdbGenres.length === 0) {
+      if (!tmdbGenres || tmdbGenres.length === 0) {
         logger.warn('No genres fetched from TMDB');
         return [];
       }
 
       const genresData = tmdbGenres.map(g => ({
         tmdbId: g.id,
-        name: g.name
+        name: g.name,
+        slug: slugify(g.name) // ✅ FIX
       }));
 
       await genreRepository.bulkUpsert(genresData);
@@ -42,12 +55,12 @@ class TMDBEnrichment {
 
       let tmdbMovie = null;
 
-      // Try to find by TMDB ID first
+      // Try to find by TMDB ID
       if (movie.tmdbId) {
         tmdbMovie = await tmdbClient.getMovieDetails(movie.tmdbId);
       }
 
-      // Try to find by IMDb ID
+      // Try IMDb ID
       if (!tmdbMovie && movie.imdbId) {
         const searchResult = await tmdbClient.findByImdbId(movie.imdbId);
         if (searchResult) {
@@ -55,14 +68,15 @@ class TMDBEnrichment {
         }
       }
 
-      // Try to search by title and year
+      // Try title + year
       if (!tmdbMovie) {
-        const searchResults = await tmdbClient.searchMovie(movie.title, movie.releaseYear);
-        
+        const searchResults = await tmdbClient.searchMovie(
+          movie.title,
+          movie.releaseYear
+        );
+
         if (searchResults.length > 0) {
-          // Take the first result (most relevant)
-          const firstResult = searchResults[0];
-          tmdbMovie = await tmdbClient.getMovieDetails(firstResult.id);
+          tmdbMovie = await tmdbClient.getMovieDetails(searchResults[0].id);
         }
       }
 
@@ -71,17 +85,19 @@ class TMDBEnrichment {
         return null;
       }
 
-      // Normalize and prepare update data
       const enrichmentData = tmdbClient.normalizeMovieData(tmdbMovie);
 
-      // Resolve and map genres
-      if (tmdbMovie.genres && tmdbMovie.genres.length > 0) {
+      // Resolve genres
+      if (tmdbMovie.genres?.length > 0) {
         const genreIds = await this.resolveGenres(tmdbMovie.genres);
         enrichmentData.genres = genreIds;
       }
 
-      // Update movie with enriched data
-      const updatedMovie = await movieRepository.update(movie._id, enrichmentData);
+      const updatedMovie = await movieRepository.update(
+        movie._id,
+        enrichmentData
+      );
+
       await movieRepository.markAsEnriched(movie._id);
 
       logger.info(`Successfully enriched movie: ${updatedMovie.title}`);
@@ -102,7 +118,8 @@ class TMDBEnrichment {
       for (const tmdbGenre of tmdbGenres) {
         const genre = await genreRepository.findOrCreate({
           tmdbId: tmdbGenre.id,
-          name: tmdbGenre.name
+          name: tmdbGenre.name,
+          slug: slugify(tmdbGenre.name) // ✅ FIX
         });
 
         if (genre) {
@@ -129,25 +146,23 @@ class TMDBEnrichment {
     for (let i = 0; i < movies.length; i += batchSize) {
       const batch = movies.slice(i, i + batchSize);
       
-      logger.info(`Enriching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(movies.length / batchSize)}`);
+      logger.info(
+        `Enriching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+          movies.length / batchSize
+        )}`
+      );
 
       for (const movie of batch) {
         const result = await this.enrichMovie(movie);
-        if (result) {
-          enriched++;
-        } else {
-          failed++;
-        }
+        result ? enriched++ : failed++;
       }
 
-      // Small delay between batches
       if (i + batchSize < movies.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(r => setTimeout(r, 1000));
       }
     }
 
     logger.info(`Batch enrichment complete: ${enriched} enriched, ${failed} failed`);
-    
     return { enriched, failed };
   }
 
@@ -166,7 +181,6 @@ class TMDBEnrichment {
       }
 
       logger.info(`Found ${movies.length} movies needing enrichment`);
-      
       return await this.enrichMovies(movies);
     } catch (error) {
       logger.error('Error enriching pending movies:', error);
@@ -176,3 +190,4 @@ class TMDBEnrichment {
 }
 
 module.exports = new TMDBEnrichment();
+  
