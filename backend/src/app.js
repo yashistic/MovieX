@@ -2,6 +2,7 @@ const express = require('express');
 const movieRoutes = require('./api/routes/movieRoutes');
 const healthRoutes = require('./api/routes/healthRoutes');
 const logger = require('./utils/logger');
+const adminRoutes = require('./api/routes/adminRoutes');
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use((req, res, next) => {
 // Mount routers at correct paths
 app.use('/api', movieRoutes);   // movieRoutes handles movies, genres, platforms, statistics
 app.use('/api/health', healthRoutes); // health routes
+app.use('/api', adminRoutes); //admin routes
 
 // Root endpoint
 app.get('/', (req, res) => {
