@@ -4,41 +4,52 @@ const catalogUpdateJob = require('../../jobs/catalogUpdateJob');
 const router = express.Router();
 
 /**
- * Manually trigger catalog update
+ * Trigger catalog update
+ * IMPORTANT:
+ * - Respond immediately (cron-job.org max timeout = 30s)
+ * - Run update in background
  */
-router.post('/admin/trigger-update', async (req, res) => {
-  try {
-    const result = await catalogUpdateJob.triggerManual();
-    
-    res.json({
-      success: true,
-      message: 'Catalog update triggered',
-      data: result
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+
+// GET → used by cron-job.org
+router.get('/admin/trigger-update', (req, res) => {
+  // ✅ respond immediately
+  res.status(200).json({
+    success: true,
+    message: 'Catalog update triggered',
+    status: 'running'
+  });
+
+  // ✅ run job in background
+  setImmediate(async () => {
+    try {
+      console.log('[INFO] UPDATE: Catalog update triggered via GET');
+      await catalogUpdateJob.triggerManual();
+      console.log('[INFO] UPDATE: Catalog update completed');
+    } catch (error) {
+      console.error('[ERROR] UPDATE failed:', error);
+    }
+  });
 });
 
-// Also add GET version (cron-job.org uses GET by default)
-router.get('/admin/trigger-update', async (req, res) => {
-  try {
-    const result = await catalogUpdateJob.triggerManual();
-    
-    res.json({
-      success: true,
-      message: 'Catalog update triggered',
-      data: result
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+// POST → optional manual/internal trigger
+router.post('/admin/trigger-update', (req, res) => {
+  // ✅ respond immediately
+  res.status(200).json({
+    success: true,
+    message: 'Catalog update triggered',
+    status: 'running'
+  });
+
+  // ✅ run job in background
+  setImmediate(async () => {
+    try {
+      console.log('[INFO] UPDATE: Catalog update triggered via POST');
+      await catalogUpdateJob.triggerManual();
+      console.log('[INFO] UPDATE: Catalog update completed');
+    } catch (error) {
+      console.error('[ERROR] UPDATE failed:', error);
+    }
+  });
 });
 
 module.exports = router;
