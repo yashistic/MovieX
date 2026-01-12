@@ -25,9 +25,6 @@ class JustWatchClient {
     });
   }
 
-  /**
-   * Make rate-limited request with retry
-   */
   async request(url, method = 'GET', data = null, headers = {}) {
     await this.rateLimiter.throttle();
 
@@ -61,13 +58,9 @@ class JustWatchClient {
     );
   }
 
-  /**
-   * Get available providers (platforms) for a region using GraphQL
-   */
   async getProviders() {
     try {
       logger.debug(`Fetching JustWatch providers for region: ${this.region}`);
-
       const query = `
         query GetPackages($country: Country!) {
           packages(country: $country) {
@@ -80,11 +73,8 @@ class JustWatchClient {
           }
         }
       `;
-
       const variables = { country: this.region };
-
       const response = await this.request(this.graphqlUrl, 'POST', { query, variables });
-
       return response.data?.packages || [];
     } catch (error) {
       logger.error('Error fetching JustWatch providers:', error.message);
@@ -92,83 +82,83 @@ class JustWatchClient {
     }
   }
 
-  /**
-   * Search for popular titles using updated GraphQL schema
-   */
   async searchTitlesGraphQL(options = {}) {
     try {
-      const { page = 1, pageSize = 30 } = options;
+      const { pageSize = 30 } = options;
+      let cursor = null;
+      let allItems = [];
+      let hasNextPage = true;
 
-      logger.debug(`Searching JustWatch titles (page ${page})`);
+      while (hasNextPage) {
+        logger.debug(`Fetching JustWatch titles, cursor: ${cursor}`);
 
-      const query = `
-        query GetPopularTitles($country: Country!, $first: Int!) {
-          popularTitles(country: $country, first: $first) {
-            edges {
-              node {
-                id
-                objectId
-                objectType
-                content(country: $country, language: "en") {
-                  title
-                  originalReleaseYear
-                  originalReleaseDate
-                  shortDescription
-                  posterUrl
-                  backdrops { backdropUrl }
-                  externalIds { imdbId tmdbId }
-                  genres { shortName translation(language: "en") }
-                }
-                offers(country: $country, platform: WEB) {
-                  monetizationType
-                  presentationType
-                  package {
-                    id
-                    packageId
-                    clearName
+        const query = `
+          query GetPopularTitles($country: Country!, $first: Int!, $after: String) {
+            popularTitles(country: $country, first: $first, after: $after) {
+              edges {
+                node {
+                  id
+                  objectId
+                  objectType
+                  content(country: $country, language: "en") {
+                    title
+                    originalReleaseYear
+                    originalReleaseDate
+                    shortDescription
+                    posterUrl
+                    backdrops { backdropUrl }
+                    externalIds { imdbId tmdbId }
+                    genres { shortName translation(language: "en") }
                   }
-                  standardWebURL
+                  offers(country: $country, platform: WEB) {
+                    monetizationType
+                    presentationType
+                    package {
+                      id
+                      packageId
+                      clearName
+                    }
+                    standardWebURL
+                  }
                 }
               }
+              pageInfo { endCursor hasNextPage }
+              totalCount
             }
-            pageInfo { endCursor hasNextPage }
-            totalCount
           }
-        }
-      `;
+        `;
 
-      const variables = { country: this.region, first: pageSize };
+        const variables = { country: this.region, first: pageSize, after: cursor };
+        const response = await this.request(this.graphqlUrl, 'POST', { query, variables });
 
-      const response = await this.request(this.graphqlUrl, 'POST', { query, variables });
+        const edges = response.data?.popularTitles?.edges || [];
+        allItems.push(...edges.map(edge => this.normalizeGraphQLNode(edge.node)));
 
-      const edges = response.data?.popularTitles?.edges || [];
-      const items = edges.map(edge => this.normalizeGraphQLNode(edge.node));
+        const pageInfo = response.data?.popularTitles?.pageInfo || {};
+        hasNextPage = pageInfo.hasNextPage || false;
+        cursor = pageInfo.endCursor || null;
 
-      const pageInfo = response.data?.popularTitles?.pageInfo || {};
-      const totalCount = response.data?.popularTitles?.totalCount || 0;
+        // Optional: break early for testing small batches
+        if (!hasNextPage) break;
+      }
 
-      return {
-        items,
-        total_pages: Math.ceil(totalCount / pageSize),
-        has_next_page: pageInfo.hasNextPage
-      };
+      return { items: allItems, total_pages: 1, has_next_page: false };
     } catch (error) {
       logger.error('Error searching JustWatch titles:', error.message);
       return { items: [], total_pages: 0, has_next_page: false };
     }
   }
 
-  /**
-   * Get titles by provider
-   */
-  async getTitlesByProvider(providerId, page = 1, pageSize = 30) {
+  async getTitlesByProvider(providerId) {
     try {
-      logger.debug(`Fetching titles from provider ${providerId}, page ${page}`);
+      logger.debug(`Fetching titles for provider ${providerId}`);
+      const result = await this.searchTitlesGraphQL({ pageSize: 50 });
 
-      // Instead of using packages, we filter after getting popularTitles
-      const result = await this.searchTitlesGraphQL({ page, pageSize });
       const filteredItems = result.items.filter(item =>
-        item.offers.some(o => o.providerId?.toString() === providerId)
+        item.offers?.some(o =>
+          (o.providerId && o.providerId.toString() === providerId.toString()) ||
+          (o.providerName && o.providerName.toLowerCase().includes('amazon')) // fallback example
+        )
       );
 
       return { ...result, items: filteredItems };
@@ -207,41 +197,6 @@ class JustWatchClient {
     } catch (error) {
       logger.error(`Error fetching JustWatch title ${justWatchId}:`, error.message);
       return null;
-    }
-  }
-
-  async searchTitles(query, page = 1) {
-    try {
-      logger.debug(`Searching JustWatch for: ${query}`);
-
-      const graphqlQuery = `
-        query SearchTitles($searchQuery: String!, $country: Country!) {
-          titleSearch(searchQuery: $searchQuery, country: $country, first: 10) {
-            edges {
-              node {
-                id
-                objectId
-                objectType
-                content(country: $country, language: "en") {
-                  title
-                  originalReleaseYear
-                }
-              }
-            }
-          }
-        }
-      `;
-
-      const response = await this.request(this.graphqlUrl, 'POST', {
-        query: graphqlQuery,
-        variables: { searchQuery: query, country: this.region }
-      });
-
-      const edges = response.data?.titleSearch?.edges || [];
-      return edges.map(edge => this.normalizeGraphQLNode(edge.node));
-    } catch (error) {
-      logger.error('Error searching JustWatch:', error.message);
-      return [];
     }
   }
 
@@ -310,4 +265,3 @@ class JustWatchClient {
 }
 
 module.exports = new JustWatchClient();
-
