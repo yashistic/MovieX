@@ -7,6 +7,7 @@ class CatalogUpdateJob {
   constructor() {
     this.job = null;
     this.isScheduled = false;
+    this.isRunning = false; // 🔒 LOCK
   }
 
   /**
@@ -29,20 +30,29 @@ class CatalogUpdateJob {
     }
 
     this.job = cron.schedule(cronSchedule, async () => {
+      if (this.isRunning) {
+        logger.warn('Catalog update already running, skipping cron execution');
+        return;
+      }
+
+      this.isRunning = true;
+
       logger.info('=================================================');
       logger.info('Cron job triggered: Starting catalog update');
       logger.info('=================================================');
 
       try {
         const result = await ingestionOrchestrator.updateCatalog();
-        
-        if (result.success) {
+
+        if (result?.success) {
           logger.info('Scheduled catalog update completed successfully');
         } else {
-          logger.error('Scheduled catalog update failed:', result.error);
+          logger.error('Scheduled catalog update failed:', result?.error);
         }
       } catch (error) {
         logger.error('Error during scheduled catalog update:', error);
+      } finally {
+        this.isRunning = false; // 🔓 UNLOCK
       }
     });
 
@@ -67,6 +77,7 @@ class CatalogUpdateJob {
   getStatus() {
     return {
       isScheduled: this.isScheduled,
+      isRunning: this.isRunning, // 🔒 expose lock state
       cronSchedule: config.ingestion.cronSchedule,
       orchestratorStatus: ingestionOrchestrator.getStatus()
     };
@@ -76,14 +87,24 @@ class CatalogUpdateJob {
    * Trigger manual update (for testing/admin)
    */
   async triggerManual() {
+    if (this.isRunning) {
+      logger.warn('Catalog update already running, manual trigger skipped');
+      return {
+        success: false,
+        error: 'Catalog update already in progress'
+      };
+    }
+
     logger.info('Manual catalog update triggered');
-    
+    this.isRunning = true;
+
     try {
-      const result = await ingestionOrchestrator.updateCatalog();
-      return result;
+      return await ingestionOrchestrator.updateCatalog();
     } catch (error) {
       logger.error('Manual catalog update failed:', error);
       throw error;
+    } finally {
+      this.isRunning = false; // 🔓 UNLOCK
     }
   }
 }
