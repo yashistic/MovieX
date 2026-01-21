@@ -18,7 +18,6 @@ class IngestionOrchestrator {
       syncGenres = false,
       ingestMovies = true,
       enrichMovies = true,
-      maxPagesPerPlatform = 10,
       maxMoviesToEnrich = 50,
       platformIds = null
     } = options;
@@ -59,10 +58,14 @@ class IngestionOrchestrator {
           };
           logger.info(`✓ Platform sync complete: ${platforms.length} platforms`);
         } catch (error) {
-          logger.error('✗ Platform sync failed:', error);
+          logger.error('✗ Platform sync failed:', {
+            message: error.message,
+            stack: error.stack,
+            response: error.response?.data || null
+          });
           results.platformsSync = {
             success: false,
-            error: error.message
+            error: error.message || 'Unknown error'
           };
         }
       } else {
@@ -80,10 +83,13 @@ class IngestionOrchestrator {
           };
           logger.info(`✓ Genre sync complete: ${genres.length} genres`);
         } catch (error) {
-          logger.error('✗ Genre sync failed:', error);
+          logger.error('✗ Genre sync failed:', {
+            message: error.message,
+            stack: error.stack
+          });
           results.genresSync = {
             success: false,
-            error: error.message
+            error: error.message || 'Unknown error'
           };
         }
       } else {
@@ -95,28 +101,30 @@ class IngestionOrchestrator {
         logger.info('[Step 3/4] Ingesting movies from JustWatch...');
         try {
           let ingestionResult;
-          
+
           if (platformIds && platformIds.length > 0) {
-            ingestionResult = await justWatchIngestion.ingestFromPlatforms(
-              platformIds,
-              maxPagesPerPlatform
-            );
+            // Fetch all movies for each selected platform
+            ingestionResult = await justWatchIngestion.ingestFromAllPlatforms(platformIds);
           } else {
-            ingestionResult = await justWatchIngestion.ingestFromAllPlatforms(
-              maxPagesPerPlatform
-            );
+            // Fetch all movies from all platforms
+            ingestionResult = await justWatchIngestion.ingestFromAllPlatforms();
           }
 
           results.moviesIngestion = {
             success: true,
-            ...ingestionResult.summary
+            totalMovies: ingestionResult?.totalMovies || 0,
+            totalAvailabilities: ingestionResult?.totalAvailabilities || 0
           };
-          logger.info(`✓ Movie ingestion complete: ${ingestionResult.summary.totalMovies} movies, ${ingestionResult.summary.totalAvailabilities} availabilities`);
+          logger.info(`✓ Movie ingestion complete: ${results.moviesIngestion.totalMovies} movies, ${results.moviesIngestion.totalAvailabilities} availabilities`);
         } catch (error) {
-          logger.error('✗ Movie ingestion failed:', error);
+          logger.error('✗ Movie ingestion failed:', {
+            message: error.message,
+            stack: error.stack,
+            response: error.response?.data || null
+          });
           results.moviesIngestion = {
             success: false,
-            error: error.message
+            error: error.message || 'Unknown error'
           };
         }
       } else {
@@ -127,9 +135,7 @@ class IngestionOrchestrator {
       if (enrichMovies) {
         logger.info('[Step 4/4] Enriching movies with TMDB data...');
         try {
-          const enrichmentResult = await tmdbEnrichment.enrichPendingMovies(
-            maxMoviesToEnrich
-          );
+          const enrichmentResult = await tmdbEnrichment.enrichPendingMovies(maxMoviesToEnrich);
 
           results.moviesEnrichment = {
             success: true,
@@ -137,10 +143,13 @@ class IngestionOrchestrator {
           };
           logger.info(`✓ Movie enrichment complete: ${enrichmentResult.enriched} enriched, ${enrichmentResult.failed} failed`);
         } catch (error) {
-          logger.error('✗ Movie enrichment failed:', error);
+          logger.error('✗ Movie enrichment failed:', {
+            message: error.message,
+            stack: error.stack
+          });
           results.moviesEnrichment = {
             success: false,
-            error: error.message
+            error: error.message || 'Unknown error'
           };
         }
       } else {
@@ -159,10 +168,13 @@ class IngestionOrchestrator {
 
       return results;
     } catch (error) {
-      logger.error('Pipeline execution failed:', error);
+      logger.error('Pipeline execution failed:', {
+        message: error.message,
+        stack: error.stack
+      });
       
       results.success = false;
-      results.error = error.message;
+      results.error = error.message || 'Unknown error';
       results.duration = Date.now() - startTime;
 
       this.lastRunTime = new Date();
@@ -177,7 +189,7 @@ class IngestionOrchestrator {
   /**
    * Bootstrap catalog (initial setup)
    */
-  async bootstrap(platformIds = null, maxPagesPerPlatform = 20) {
+  async bootstrap(platformIds = null) {
     logger.info('=================================================');
     logger.info('BOOTSTRAP: Initializing catalog from scratch');
     logger.info('=================================================');
@@ -187,7 +199,6 @@ class IngestionOrchestrator {
       syncGenres: true,
       ingestMovies: true,
       enrichMovies: true,
-      maxPagesPerPlatform,
       maxMoviesToEnrich: 100,
       platformIds
     });
@@ -206,7 +217,6 @@ class IngestionOrchestrator {
       syncGenres: false,
       ingestMovies: true,
       enrichMovies: true,
-      maxPagesPerPlatform: 5,
       maxMoviesToEnrich: 50
     });
   }
@@ -224,3 +234,4 @@ class IngestionOrchestrator {
 }
 
 module.exports = new IngestionOrchestrator();
+
