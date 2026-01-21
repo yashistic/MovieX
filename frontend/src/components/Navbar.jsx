@@ -3,7 +3,7 @@ import { Film, Sun, Moon, User } from 'lucide-react';
 
 const Navbar = ({ currentPage, onNavigate, theme, onThemeToggle, isLoggedIn, onLogout }) => (
   <nav className={`border-b ${theme === 'retro' ? 'border-stone-800 bg-stone-950/95' : 'border-stone-200 bg-stone-50/95'} backdrop-blur-sm sticky top-0 z-50`}>
-    <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div className="w-full px-8 py-4 flex items-center justify-between">
       <button 
         onClick={() => onNavigate('landing')}
         className={`flex items-center gap-2 text-2xl font-serif tracking-wide ${theme === 'retro' ? 'text-stone-100 hover:text-amber-100' : 'text-stone-900 hover:text-amber-700'} transition-colors duration-300`}

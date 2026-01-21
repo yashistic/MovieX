@@ -1,218 +1,282 @@
-import React, { useState } from 'react';
-import { Search, Star, Film, User, Sun, Moon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import MovieCard from '../components/MovieCard';
+import PlanetaryView from '../components/planetary/PlanetaryView';
+import { Search, Loader, ChevronDown, ArrowLeft } from 'lucide-react';
+import movieService from '../services/movieService';
 
-// Mock Data
-const mockMovies = [
-  { id: 1, title: "The Godfather", year: 1972, rating: 9.2, genre: "Crime", platform: "Paramount+", poster: "https://images.unsplash.com/photo-1594908900066-3f47337549d8?w=400&h=600&fit=crop" },
-  { id: 2, title: "Vertigo", year: 1958, rating: 8.3, genre: "Thriller", platform: "Netflix", poster: "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=600&fit=crop" },
-  { id: 3, title: "Casablanca", year: 1942, rating: 8.5, genre: "Romance", platform: "HBO Max", poster: "https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&h=600&fit=crop" },
-  { id: 4, title: "Tokyo Story", year: 1953, rating: 8.1, genre: "Drama", platform: "Criterion", poster: "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=600&fit=crop" },
-  { id: 5, title: "8½", year: 1963, rating: 8.0, genre: "Drama", platform: "Amazon Prime", poster: "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=400&h=600&fit=crop" },
-  { id: 6, title: "The Third Man", year: 1949, rating: 8.1, genre: "Noir", platform: "Zee5", poster: "https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=400&h=600&fit=crop" },
-  { id: 7, title: "Rashomon", year: 1950, rating: 8.2, genre: "Drama", platform: "SonyLiv", poster: "https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=400&h=600&fit=crop" },
-];
+export default function CatalogPage({ theme }) {
+  const [viewMode, setViewMode] = useState('planetary'); // 'planetary' or 'grid'
+  const [movies, setMovies] = useState([]);
+  const [genres, setGenres] = useState([]);
+  const [platforms, setPlatforms] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(null);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
 
-const MovieCard = ({ movie, onClick, theme }) => (
-  <div onClick={onClick} className="group cursor-pointer">
-    <div className={`relative overflow-hidden ${theme === 'retro' ? 'bg-stone-900 border-stone-800 hover:border-amber-900/50 hover:shadow-amber-950/30' : 'bg-stone-100 border-stone-300 hover:border-amber-700/50 hover:shadow-amber-200/50'} border transition-all duration-500 shadow-lg hover:shadow-2xl`}>
-      <div className="aspect-[2/3] overflow-hidden">
-        <img 
-          src={movie.poster} 
-          alt={movie.title}
-          className={`w-full h-full object-cover ${theme === 'retro' ? 'opacity-90' : 'opacity-95'} group-hover:opacity-100 group-hover:scale-105 transition-all duration-700`}
-        />
-      </div>
-      <div className={`absolute inset-0 bg-gradient-to-t ${theme === 'retro' ? 'from-stone-950 via-stone-950/20' : 'from-stone-100 via-stone-100/20'} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-    </div>
-    
-    <div className="mt-3 space-y-1">
-      <h3 className={`font-serif text-lg tracking-wide ${theme === 'retro' ? 'text-stone-100 group-hover:text-amber-100' : 'text-stone-900 group-hover:text-amber-700'} transition-colors duration-300`}>{movie.title}</h3>
-      <div className={`flex items-center gap-3 text-sm ${theme === 'retro' ? 'text-stone-500' : 'text-stone-600'}`}>
-        <span>{movie.year}</span>
-        <span>·</span>
-        <div className="flex items-center gap-1">
-          <Star size={12} className={theme === 'retro' ? 'text-amber-700' : 'text-amber-600'} fill="currentColor" />
-          <span>{movie.rating}</span>
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedGenre, setSelectedGenre] = useState('all');
+  const [selectedPlatform, setSelectedPlatform] = useState('all');
+  const [selectedYear, setSelectedYear] = useState('all');
+
+  const MOVIES_PER_PAGE = 40;
+
+  // Handle genre selection from planetary view
+  const handleSelectGenre = (genre) => {
+    setSelectedGenre(genre.name);
+    setViewMode('grid');
+    fetchMoviesForGenre(genre.name);
+  };
+
+  // Fetch movies for selected genre
+  const fetchMoviesForGenre = async (genreName) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [moviesData, genresData, platformsData] = await Promise.all([
+        movieService.getMoviesByGenre(genreName, { limit: MOVIES_PER_PAGE, page: 1 }),
+        movieService.getGenres(),
+        movieService.getPlatforms(),
+      ]);
+
+      setMovies(moviesData.data || []);
+      setPagination(moviesData.pagination || { page: 1, pages: 1, total: 0 });
+      setGenres(genresData.data || []);
+      setPlatforms(platformsData.data || []);
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setError('Failed to load movies.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Return to planetary view
+  const handleBackToPlanetary = () => {
+    setViewMode('planetary');
+    setSelectedGenre('all');
+    setMovies([]);
+  };
+
+  // Fetch initial data for grid view
+  useEffect(() => {
+    if (viewMode === 'grid' && movies.length === 0 && selectedGenre === 'all') {
+      fetchInitialData();
+    }
+  }, [viewMode]);
+
+  const fetchInitialData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch movies, genres, and platforms in parallel
+      const [moviesData, genresData, platformsData] = await Promise.all([
+        movieService.getMovies({ limit: MOVIES_PER_PAGE, page: 1 }),
+        movieService.getGenres(),
+        movieService.getPlatforms(),
+      ]);
+
+      setMovies(moviesData.data || []);
+      setPagination(moviesData.pagination || { page: 1, pages: 1, total: 0 });
+      setGenres(genresData.data || []);
+      setPlatforms(platformsData.data || []);
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setError('Failed to load movies. Please make sure the backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMoreMovies = async () => {
+    if (loadingMore || pagination.page >= pagination.pages) return;
+
+    try {
+      setLoadingMore(true);
+      const nextPage = pagination.page + 1;
+
+      // Use genre-specific endpoint if a genre is selected
+      const moviesData = selectedGenre !== 'all'
+        ? await movieService.getMoviesByGenre(selectedGenre, { limit: MOVIES_PER_PAGE, page: nextPage })
+        : await movieService.getMovies({ limit: MOVIES_PER_PAGE, page: nextPage });
+
+      setMovies(prev => [...prev, ...(moviesData.data || [])]);
+      setPagination(moviesData.pagination || pagination);
+    } catch (err) {
+      console.error('Error loading more movies:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Filter movies based on search and filters
+  const filteredMovies = movies.filter(movie => {
+    const matchesSearch = movie.title?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesGenre = selectedGenre === 'all' || 
+      movie.genres?.some(g => g.name === selectedGenre);
+    const matchesPlatform = selectedPlatform === 'all' || 
+      movie.platforms?.some(p => p.name === selectedPlatform);
+    const matchesYear = selectedYear === 'all' || 
+      movie.releaseDate?.startsWith(selectedYear);
+
+    return matchesSearch && matchesGenre && matchesPlatform && matchesYear;
+  });
+
+  const isDark = theme === 'retro';
+
+  // Show planetary view
+  if (viewMode === 'planetary') {
+    return <PlanetaryView onSelectGenre={handleSelectGenre} theme={theme} />;
+  }
+
+  // Grid view loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center">
+          <Loader className="w-12 h-12 animate-spin mx-auto mb-4 text-indigo-500" />
+          <p className="text-white/50">Loading movies...</p>
         </div>
       </div>
-    </div>
-  </div>
-);
+    );
+  }
 
-const CatalogPage = ({ theme }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState('All');
-  const [selectedDecade, setSelectedDecade] = useState('All Years');
-  const [selectedPlatform, setSelectedPlatform] = useState('All Platforms');
-  const [isGenreDropdownOpen, setIsGenreDropdownOpen] = useState(false);
-  const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
-  const [isPlatformDropdownOpen, setIsPlatformDropdownOpen] = useState(false);
-  
-  const genres = ['All', ...new Set(mockMovies.map(m => m.genre))];
-  const decades = ['All Years', '1940s', '1950s', '1960s', '1970s'];
-  const platforms = ['All Platforms', ...new Set(mockMovies.map(m => m.platform))];
-  
-  const filteredMovies = mockMovies.filter(movie => {
-    const matchesSearch = movie.title.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesGenre = selectedGenre === 'All' || movie.genre === selectedGenre;
-    const matchesPlatform = selectedPlatform === 'All Platforms' || movie.platform === selectedPlatform;
-    
-    let matchesDecade = true;
-    if (selectedDecade !== 'All Years') {
-      const decadeStart = parseInt(selectedDecade);
-      matchesDecade = movie.year >= decadeStart && movie.year < decadeStart + 10;
-    }
-    
-    return matchesSearch && matchesGenre && matchesDecade && matchesPlatform;
-  });
-  
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-6">
+          <p className="text-lg mb-4 text-red-400">{error}</p>
+          <button
+            onClick={() => fetchMoviesForGenre(selectedGenre)}
+            className="px-6 py-2 rounded bg-indigo-500 text-white hover:bg-indigo-400"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`min-h-screen ${theme === 'retro' ? 'bg-stone-950' : 'bg-stone-50'}`}>
-      <div className="max-w-7xl mx-auto px-6 py-12">
-        <div className="mb-12">
-          <h1 className={`font-serif text-5xl tracking-wide mb-8 ${theme === 'retro' ? 'text-stone-100' : 'text-stone-900'}`}>Film Archive</h1>
-          
-          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${theme === 'retro' ? 'text-stone-600' : 'text-stone-400'}`} size={18} />
-              <input
-                type="text"
-                placeholder="Search by title..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className={`w-full pl-10 pr-4 py-3 ${theme === 'retro' ? 'bg-stone-900/50 border-stone-800 text-stone-300 placeholder-stone-600 focus:border-amber-900/50' : 'bg-white border-stone-300 text-stone-900 placeholder-stone-400 focus:border-amber-700'} border focus:outline-none transition-colors duration-300 text-sm tracking-wide`}
-              />
-            </div>
-            
-            <div className="flex gap-3 flex-wrap">
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    setIsGenreDropdownOpen(!isGenreDropdownOpen);
-                    setIsYearDropdownOpen(false);
-                    setIsPlatformDropdownOpen(false);
-                  }}
-                  className={`px-6 py-3 ${theme === 'retro' ? 'bg-stone-900/50 border-stone-800 text-stone-300' : 'bg-white border-stone-300 text-stone-700'} border transition-all duration-300 text-sm tracking-wide flex items-center gap-2 min-w-[180px] justify-between`}
-                >
-                  <span>{selectedGenre}</span>
-                  <svg className={`w-4 h-4 transition-transform duration-300 ${isGenreDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                
-                {isGenreDropdownOpen && (
-                  <div className={`absolute top-full mt-2 w-full ${theme === 'retro' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-300'} border shadow-2xl z-10`}>
-                    {genres.map(genre => (
-                      <button
-                        key={genre}
-                        onClick={() => {
-                          setSelectedGenre(genre);
-                          setIsGenreDropdownOpen(false);
-                        }}
-                        className={`w-full px-6 py-3 text-left text-sm tracking-wide transition-all duration-300 ${
-                          selectedGenre === genre
-                            ? theme === 'retro' ? 'bg-amber-900/30 text-amber-100' : 'bg-amber-100 text-amber-900'
-                            : theme === 'retro' ? 'text-stone-300 hover:bg-stone-800/50' : 'text-stone-700 hover:bg-stone-100'
-                        }`}
-                      >
-                        {genre}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    setIsYearDropdownOpen(!isYearDropdownOpen);
-                    setIsGenreDropdownOpen(false);
-                    setIsPlatformDropdownOpen(false);
-                  }}
-                  className={`px-6 py-3 ${theme === 'retro' ? 'bg-stone-900/50 border-stone-800 text-stone-300' : 'bg-white border-stone-300 text-stone-700'} border transition-all duration-300 text-sm tracking-wide flex items-center gap-2 min-w-[180px] justify-between`}
-                >
-                  <span>{selectedDecade}</span>
-                  <svg className={`w-4 h-4 transition-transform duration-300 ${isYearDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                
-                {isYearDropdownOpen && (
-                  <div className={`absolute top-full mt-2 w-full ${theme === 'retro' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-300'} border shadow-2xl z-10`}>
-                    {decades.map(decade => (
-                      <button
-                        key={decade}
-                        onClick={() => {
-                          setSelectedDecade(decade);
-                          setIsYearDropdownOpen(false);
-                        }}
-                        className={`w-full px-6 py-3 text-left text-sm tracking-wide transition-all duration-300 ${
-                          selectedDecade === decade
-                            ? theme === 'retro' ? 'bg-amber-900/30 text-amber-100' : 'bg-amber-100 text-amber-900'
-                            : theme === 'retro' ? 'text-stone-300 hover:bg-stone-800/50' : 'text-stone-700 hover:bg-stone-100'
-                        }`}
-                      >
-                        {decade}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    setIsPlatformDropdownOpen(!isPlatformDropdownOpen);
-                    setIsGenreDropdownOpen(false);
-                    setIsYearDropdownOpen(false);
-                  }}
-                  className={`px-6 py-3 ${theme === 'retro' ? 'bg-stone-900/50 border-stone-800 text-stone-300' : 'bg-white border-stone-300 text-stone-700'} border transition-all duration-300 text-sm tracking-wide flex items-center gap-2 min-w-[180px] justify-between`}
-                >
-                  <span>{selectedPlatform}</span>
-                  <svg className={`w-4 h-4 transition-transform duration-300 ${isPlatformDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                
-                {isPlatformDropdownOpen && (
-                  <div className={`absolute top-full mt-2 w-full ${theme === 'retro' ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-300'} border shadow-2xl z-10`}>
-                    {platforms.map(platform => (
-                      <button
-                        key={platform}
-                        onClick={() => {
-                          setSelectedPlatform(platform);
-                          setIsPlatformDropdownOpen(false);
-                        }}
-                        className={`w-full px-6 py-3 text-left text-sm tracking-wide transition-all duration-300 ${
-                          selectedPlatform === platform
-                            ? theme === 'retro' ? 'bg-amber-900/30 text-amber-100' : 'bg-amber-100 text-amber-900'
-                            : theme === 'retro' ? 'text-stone-300 hover:bg-stone-800/50' : 'text-stone-700 hover:bg-stone-100'
-                        }`}
-                      >
-                        {platform}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+    <div className="min-h-screen bg-[#0a0a0f] py-8">
+      <div className="container mx-auto px-4">
+        {/* Back button and genre title */}
+        <div className="flex items-center gap-4 mb-8">
+          <button
+            onClick={handleBackToPlanetary}
+            className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors border border-white/10"
+          >
+            <ArrowLeft className="w-5 h-5 text-white/60" />
+          </button>
+          <h1 className="text-3xl font-light text-white tracking-wide">
+            {selectedGenre !== 'all' ? selectedGenre : 'All Movies'}
+          </h1>
+        </div>
+
+        {/* Search and Filters */}
+        <div className="mb-8 space-y-4">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/30" />
+            <input
+              type="text"
+              placeholder="Search movies..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50"
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <select
+              value={selectedGenre}
+              onChange={(e) => {
+                setSelectedGenre(e.target.value);
+                if (e.target.value !== 'all') {
+                  fetchMoviesForGenre(e.target.value);
+                } else {
+                  fetchInitialData();
+                }
+              }}
+              className="px-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
+              <option value="all">All Genres</option>
+              {genres.map((genre) => (
+                <option key={genre._id} value={genre.name}>
+                  {genre.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedPlatform}
+              onChange={(e) => setSelectedPlatform(e.target.value)}
+              className="px-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
+              <option value="all">All Platforms</option>
+              {platforms.map((platform) => (
+                <option key={platform._id} value={platform.name}>
+                  {platform.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="px-4 py-3 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
+              <option value="all">All Years</option>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+              <option value="2023">2023</option>
+              <option value="2022">2022</option>
+            </select>
           </div>
         </div>
-        
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
-          {filteredMovies.map(movie => (
-            <MovieCard key={movie.id} movie={movie} onClick={() => {}} theme={theme} />
-          ))}
-        </div>
-        
-        {filteredMovies.length === 0 && (
-          <div className="text-center py-20">
-            <p className={`text-lg tracking-wide ${theme === 'retro' ? 'text-stone-500' : 'text-stone-600'}`}>No films found in the archive.</p>
+
+        {/* Movies Grid */}
+        {filteredMovies.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredMovies.map((movie) => (
+              <MovieCard key={movie._id} movie={movie} theme="retro" />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-lg text-white/40">
+              No movies found matching your criteria
+            </p>
+          </div>
+        )}
+
+        {/* Load More Button */}
+        {pagination.page < pagination.pages && (
+          <div className="flex justify-center mt-8">
+            <button
+              onClick={loadMoreMovies}
+              disabled={loadingMore}
+              className="flex items-center gap-2 px-8 py-3 rounded-lg font-medium transition-all bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-50"
+            >
+              {loadingMore ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-5 h-5" />
+                  Load More Movies
+                </>
+              )}
+            </button>
           </div>
         )}
       </div>
     </div>
   );
-};
-
-export default CatalogPage;
+}

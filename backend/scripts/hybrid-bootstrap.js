@@ -42,14 +42,17 @@ async function hybridBootstrap() {
             try {
               // Check if movie already exists
               const existing = await movieRepository.findByTmdbId(tmdbMovie.id);
-              
+
               if (existing) {
                 logger.debug(`  ⏭️  Skipping existing: ${tmdbMovie.title}`);
                 continue;
               }
-              
+
+              // Fetch full movie details to get runtime and other info
+              const fullDetails = await tmdbClient.getMovieDetails(tmdbMovie.id);
+              const movieData = tmdbClient.normalizeMovieData(fullDetails || tmdbMovie);
+
               // Save movie
-              const movieData = tmdbClient.normalizeMovieData(tmdbMovie);
               const movie = await movieRepository.upsertByJustWatchId({
                 ...movieData,
                 justWatchId: `tmdb_${tmdbMovie.id}`,
