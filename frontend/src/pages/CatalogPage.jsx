@@ -4,7 +4,7 @@ import PlanetaryView from '../components/planetary/PlanetaryView';
 import { Search, Loader, ChevronDown, ArrowLeft } from 'lucide-react';
 import movieService from '../services/movieService';
 
-export default function CatalogPage({ theme }) {
+export default function CatalogPage({ onSelectMovie, onNavigate }) {
   const [viewMode, setViewMode] = useState('planetary'); // 'planetary' or 'grid'
   const [movies, setMovies] = useState([]);
   const [genres, setGenres] = useState([]);
@@ -124,11 +124,9 @@ export default function CatalogPage({ theme }) {
     return matchesSearch && matchesGenre && matchesPlatform && matchesYear;
   });
 
-  const isDark = theme === 'retro';
-
   // Show planetary view
   if (viewMode === 'planetary') {
-    return <PlanetaryView onSelectGenre={handleSelectGenre} theme={theme} />;
+    return <PlanetaryView onSelectGenre={handleSelectGenre} onSelectMovie={onSelectMovie} onNavigate={onNavigate} />;
   }
 
   // Grid view loading state
@@ -243,7 +241,7 @@ export default function CatalogPage({ theme }) {
         {filteredMovies.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredMovies.map((movie) => (
-              <MovieCard key={movie._id} movie={movie} theme="retro" />
+              <MovieCard key={movie._id} movie={movie} theme="retro" onSelectMovie={onSelectMovie} />
             ))}
           </div>
         ) : (

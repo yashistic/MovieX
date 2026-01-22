@@ -1,79 +1,68 @@
 import React, { useState } from 'react';
-import Navbar from './components/Navbar';
-import Footer from './components/Footer';
-import LandingPage from './pages/LandingPage';
+import { AuthProvider } from './context/AuthContext';
 import CatalogPage from './pages/CatalogPage';
 import RecommendationsPage from './pages/RecommendationsPage';
-import ProfilePage from './pages/ProfilePage';
+import MovieDetailPage from './pages/MovieDetailPage';
+import UserProfilePage from './pages/UserProfilePage';
 import AuthPage from './pages/AuthPage';
 
-export default function App() {
-  const [currentPage, setCurrentPage] = useState('landing');
-  const [theme, setTheme] = useState('retro');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
-  
+function AppContent() {
+  const [currentPage, setCurrentPage] = useState('catalog');
+  const [selectedMovie, setSelectedMovie] = useState(null);
+
   const handleNavigate = (page) => {
-    if (page === 'profile' && !isLoggedIn) {
-      setCurrentPage('auth');
-      setIsSignUp(false);
-    } else {
-      setCurrentPage(page);
-    }
-  };
-  
-  const toggleTheme = () => {
-    setTheme(theme === 'retro' ? 'modern' : 'retro');
+    setCurrentPage(page);
+    setSelectedMovie(null);
   };
 
-  const handleLogin = () => {
-    setIsLoggedIn(true);
-    setCurrentPage('profile');
+  const handleSelectMovie = (movie) => {
+    setSelectedMovie(movie);
+    setCurrentPage('movie');
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setCurrentPage('landing');
+  const handleBackFromMovie = () => {
+    setSelectedMovie(null);
+    setCurrentPage('catalog');
   };
 
-  const toggleAuthMode = () => {
-    setIsSignUp(!isSignUp);
-  };
-  
   return (
-    <div className={`min-h-screen ${theme === 'retro' ? 'bg-stone-950' : 'bg-stone-50'}`}>
-      {currentPage !== 'landing' && (
-        <Navbar 
-          currentPage={currentPage} 
-          onNavigate={handleNavigate} 
-          theme={theme} 
-          onThemeToggle={toggleTheme} 
-          isLoggedIn={isLoggedIn} 
-          onLogout={handleLogout} 
+    <div className="min-h-screen bg-[#050508]">
+      {currentPage === 'catalog' && (
+        <CatalogPage
+          onSelectMovie={handleSelectMovie}
+          onNavigate={handleNavigate}
         />
       )}
-      
-      {currentPage === 'landing' && (
-        <LandingPage 
-          onNavigate={handleNavigate} 
-          theme={theme} 
-          isLoggedIn={isLoggedIn} 
-          onThemeToggle={toggleTheme} 
+
+      {currentPage === 'movie' && selectedMovie && (
+        <MovieDetailPage
+          movie={selectedMovie}
+          onBack={handleBackFromMovie}
         />
       )}
-      {currentPage === 'catalog' && <CatalogPage theme={theme} />}
-      {currentPage === 'recommendations' && <RecommendationsPage theme={theme} />}
-      {currentPage === 'profile' && <ProfilePage theme={theme} isLoggedIn={isLoggedIn} />}
+
+      {currentPage === 'recommendations' && (
+        <RecommendationsPage onNavigate={handleNavigate} />
+      )}
+
+      {currentPage === 'profile' && (
+        <UserProfilePage
+          onNavigate={handleNavigate}
+          onSelectMovie={handleSelectMovie}
+        />
+      )}
+
       {currentPage === 'auth' && (
-        <AuthPage 
-          isSignUp={isSignUp} 
-          onToggle={toggleAuthMode} 
-          onLogin={handleLogin} 
-          theme={theme} 
-        />
+        <AuthPage onNavigate={handleNavigate} />
       )}
-      
-      {currentPage !== 'landing' && <Footer theme={theme} />}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

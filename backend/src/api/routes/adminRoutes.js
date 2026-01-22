@@ -1,7 +1,12 @@
 const express = require('express');
 const catalogUpdateJob = require('../../jobs/catalogUpdateJob');
+const { authenticate, authorize } = require('../../middleware/auth');
 
 const router = express.Router();
+
+// All admin routes require authentication and admin role
+router.use(authenticate);
+router.use(authorize('admin'));
 
 /**
  * Trigger catalog update

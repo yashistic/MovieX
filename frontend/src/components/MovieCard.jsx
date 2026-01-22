@@ -1,9 +1,47 @@
-import React, { useState } from 'react';
-import { Star, Clock, Calendar, Film } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Star, Clock, Calendar, Film, Heart, Bookmark, Eye, Loader } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import userService from '../services/userService';
 
-export default function MovieCard({ movie, theme }) {
+export default function MovieCard({ movie, theme, onSelectMovie }) {
   const [isHovered, setIsHovered] = useState(false);
+  const { isAuthenticated } = useAuth();
   const isDark = theme === 'retro';
+
+  // Movie action states
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [isWatched, setIsWatched] = useState(false);
+  const [actionLoading, setActionLoading] = useState({ favorite: false, watchlist: false, watched: false });
+
+  // Check initial states when component mounts
+  useEffect(() => {
+    const checkMovieStatus = async () => {
+      if (!isAuthenticated || !movie?._id) return;
+
+      try {
+        const [favRes, watchlistRes, watchedRes] = await Promise.all([
+          userService.getFavorites(),
+          userService.getWatchlist(),
+          userService.getWatched()
+        ]);
+
+        if (favRes.success) {
+          setIsFavorite(favRes.data.favorites?.some(m => m._id === movie._id) || false);
+        }
+        if (watchlistRes.success) {
+          setIsInWatchlist(watchlistRes.data.watchlist?.some(m => m._id === movie._id) || false);
+        }
+        if (watchedRes.success) {
+          setIsWatched(watchedRes.data.watched?.some(w => w.movie?._id === movie._id) || false);
+        }
+      } catch (error) {
+        // Silently fail - user may not be authenticated
+      }
+    };
+
+    checkMovieStatus();
+  }, [isAuthenticated, movie?._id]);
 
   // Safely extract data with fallbacks
   const title = movie.title || 'Untitled';
@@ -20,6 +58,92 @@ export default function MovieCard({ movie, theme }) {
   const overview = movie.overview || 'No synopsis available.';
   const language = movie.originalLanguage?.toUpperCase() || 'N/A';
 
+  const handleFavoriteToggle = async (e) => {
+    e.stopPropagation();
+    if (!isAuthenticated || !movie?._id) return;
+
+    setActionLoading(prev => ({ ...prev, favorite: true }));
+    try {
+      if (isFavorite) {
+        await userService.removeFromFavorites(movie._id);
+        setIsFavorite(false);
+      } else {
+        await userService.addToFavorites(movie._id);
+        setIsFavorite(true);
+      }
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+    } finally {
+      setActionLoading(prev => ({ ...prev, favorite: false }));
+    }
+  };
+
+  const handleWatchlistToggle = async (e) => {
+    e.stopPropagation();
+    if (!isAuthenticated || !movie?._id) return;
+
+    setActionLoading(prev => ({ ...prev, watchlist: true }));
+    try {
+      if (isInWatchlist) {
+        await userService.removeFromWatchlist(movie._id);
+        setIsInWatchlist(false);
+      } else {
+        await userService.addToWatchlist(movie._id);
+        setIsInWatchlist(true);
+      }
+    } catch (error) {
+      console.error('Error toggling watchlist:', error);
+    } finally {
+      setActionLoading(prev => ({ ...prev, watchlist: false }));
+    }
+  };
+
+  const handleWatchedToggle = async (e) => {
+    e.stopPropagation();
+    if (!isAuthenticated || !movie?._id) return;
+
+    setActionLoading(prev => ({ ...prev, watched: true }));
+    try {
+      if (isWatched) {
+        await userService.removeFromWatched(movie._id);
+        setIsWatched(false);
+      } else {
+        await userService.markAsWatched(movie._id);
+        setIsWatched(true);
+        // Auto-remove from watchlist when marked as watched
+        if (isInWatchlist) {
+          setIsInWatchlist(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling watched:', error);
+    } finally {
+      setActionLoading(prev => ({ ...prev, watched: false }));
+    }
+  };
+
+  const ActionButton = ({ onClick, isActive, isLoading, activeColor, Icon, label }) => (
+    <button
+      onClick={onClick}
+      disabled={isLoading || !isAuthenticated}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+        isActive
+          ? `${activeColor} text-white`
+          : isAuthenticated
+            ? 'bg-black/40 text-white/70 hover:bg-black/60 hover:text-white'
+            : 'bg-black/20 text-white/30 cursor-not-allowed'
+      }`}
+      title={!isAuthenticated ? 'Sign in to use this feature' : label}
+    >
+      {isLoading ? (
+        <Loader className="w-3.5 h-3.5 animate-spin" />
+      ) : (
+        <Icon className={`w-3.5 h-3.5 ${isActive ? 'fill-current' : ''}`} />
+      )}
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+
   return (
     <div
       className="relative"
@@ -28,6 +152,7 @@ export default function MovieCard({ movie, theme }) {
     >
       {/* Main Card */}
       <div
+        onClick={() => onSelectMovie && onSelectMovie(movie)}
         className={`rounded-lg overflow-hidden ${
           isDark
             ? 'bg-stone-900 border border-stone-800 hover:border-yellow-500'
@@ -47,6 +172,40 @@ export default function MovieCard({ movie, theme }) {
           <div className="absolute top-2 right-2 bg-black/70 px-2 py-1 rounded flex items-center gap-1">
             <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
             <span className="text-white text-sm font-semibold">{rating}</span>
+          </div>
+
+          {/* Action buttons overlay */}
+          <div
+            className={`absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${
+              isHovered ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
+            <div className="flex justify-center gap-1.5">
+              <ActionButton
+                onClick={handleFavoriteToggle}
+                isActive={isFavorite}
+                isLoading={actionLoading.favorite}
+                activeColor="bg-red-500"
+                Icon={Heart}
+                label="Favorite"
+              />
+              <ActionButton
+                onClick={handleWatchlistToggle}
+                isActive={isInWatchlist}
+                isLoading={actionLoading.watchlist}
+                activeColor="bg-blue-500"
+                Icon={Bookmark}
+                label="Watchlist"
+              />
+              <ActionButton
+                onClick={handleWatchedToggle}
+                isActive={isWatched}
+                isLoading={actionLoading.watched}
+                activeColor="bg-green-500"
+                Icon={Eye}
+                label="Watched"
+              />
+            </div>
           </div>
         </div>
 
@@ -129,6 +288,34 @@ export default function MovieCard({ movie, theme }) {
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Action buttons in hover card */}
+              <div className="flex gap-2 mb-4">
+                <ActionButton
+                  onClick={handleFavoriteToggle}
+                  isActive={isFavorite}
+                  isLoading={actionLoading.favorite}
+                  activeColor="bg-red-500"
+                  Icon={Heart}
+                  label="Favorite"
+                />
+                <ActionButton
+                  onClick={handleWatchlistToggle}
+                  isActive={isInWatchlist}
+                  isLoading={actionLoading.watchlist}
+                  activeColor="bg-blue-500"
+                  Icon={Bookmark}
+                  label="Watchlist"
+                />
+                <ActionButton
+                  onClick={handleWatchedToggle}
+                  isActive={isWatched}
+                  isLoading={actionLoading.watched}
+                  activeColor="bg-green-500"
+                  Icon={Eye}
+                  label="Watched"
+                />
               </div>
 
               {/* Genres */}
