@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: moviex-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: TMDB_BASE_URL
+        value: https://api.themoviedb.org/3
+      - key: JUSTWATCH_BASE_URL
+        value: https://apis.justwatch.com/content
+      - key: JUSTWATCH_REGION
+        value: en_IN
+      - key: JUSTWATCH_LANGUAGE
+        value: en
+      - key: JWT_SECRET
+        generateValue: true
+      - key: LOG_LEVEL
+        value: info
